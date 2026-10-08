@@ -11,7 +11,7 @@
   }
 
   function formatTimestamp(timestamp: Date): string {
-    return timestamp.toLocaleString();
+    return timestamp.toLocaleString($translations.getLanguage() === 'fi' ? 'fi-FI' : undefined);
   }
 
   function copyToClipboard() {

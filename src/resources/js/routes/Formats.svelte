@@ -30,7 +30,7 @@
     [...formats].sort((f1, f2) => getFormatName(f1).localeCompare(getFormatName(f2))).filter((f) => getFormatName(f).toLowerCase().indexOf(searchTerm.toLowerCase()) !== -1)
   );
 
-  const language = translations.getLanguage();
+  const language = $derived($translations.getLanguage());
 
   async function getFormats(): Promise<void> {
     try {

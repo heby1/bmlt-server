@@ -38,5 +38,10 @@ add dependencies, abstractions or infrastructure without an explicit need.
   `FINNISH_MIGRATION.md`; do not silently change BMLT or source meanings.
 - Check dry-run behavior, initial import, unchanged rerun, source changes and
   deletions, invalid records, and fetch failure with no database changes.
-- Preserve upstream conventions and build packaging. Finnish UI translation and
-  investigation of the WordPress placeholder/count bug are later work.
+- Preserve upstream conventions and build packaging. Keep Finnish frontend and
+  `src/lang/fi` translations aligned with English keys and placeholders. Finnish
+  views use a 24-hour clock and Monday first; native weekday IDs stay unchanged.
+- `translations.xlsx` contains the 303 frontend UI strings (English and Finnish),
+  not Yup messages, PHP translations or database format metadata. Update its
+  Finnish column when changing the corresponding frontend translations.
+- Investigation of the WordPress placeholder/count bug is later work.

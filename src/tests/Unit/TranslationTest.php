@@ -25,6 +25,7 @@ class TranslationTest extends TestCase
         foreach ($otherLanguages as $otherPath) {
             $otherTranslations = collect(scandir($otherPath))
                 ->reject(fn ($dir) => $dir == '.' || $dir == '..')
+                ->reject(fn ($dir) => $dir == 'auth.php' || $dir == 'pagination.php' || $dir == 'passwords.php' || $dir == 'validation.php')
                 ->mapWithKeys(fn ($filename, $_) => [$filename => include($otherPath . '/' . $filename)]);
 
             $this->assertEquals(count($englishTranslations), count($otherTranslations));

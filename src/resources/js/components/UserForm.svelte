@@ -27,9 +27,9 @@
   const USER_TYPE_OBSERVER = 'observer';
   const USER_TYPE_SERVICE_BODY_ADMIN = 'serviceBodyAdmin';
   const userTypeItems = [
-    { value: USER_TYPE_DEACTIVATED, name: 'Deactivated' },
-    { value: USER_TYPE_OBSERVER, name: 'Observer' },
-    { value: USER_TYPE_SERVICE_BODY_ADMIN, name: 'Service Body Administrator' }
+    { value: USER_TYPE_DEACTIVATED, name: $translations.deactivatedTitle },
+    { value: USER_TYPE_OBSERVER, name: $translations.observerTitle },
+    { value: USER_TYPE_SERVICE_BODY_ADMIN, name: $translations.serviceBodyAdminTitle }
   ];
   const initialValues = {
     type: selectedUser?.type ?? USER_TYPE_SERVICE_BODY_ADMIN,
@@ -95,7 +95,7 @@
         password: yup
           .string()
           .transform((v) => (v ? v : undefined))
-          .test('validatePassword', 'password must be between 12 and 255 characters', (password) => {
+          .test('validatePassword', translations.getLanguage() === 'fi' ? 'Salasanan pituuden on oltava 12–255 merkkiä.' : 'password must be between 12 and 255 characters', (password) => {
             const isEditing = selectedUser !== null;
             if (!password) {
               return isEditing ? true : false;
@@ -139,7 +139,7 @@
         <div>
           <span class="font-medium">{$translations.lastLoginTitle}:</span>
           <span class="ml-2 text-gray-600 dark:text-gray-400">
-            {new Date(selectedUser.lastLoginAt).toLocaleString()}
+            {new Date(selectedUser.lastLoginAt).toLocaleString($translations.getLanguage() === 'fi' ? 'fi-FI' : undefined)}
           </span>
         </div>
       {/if}

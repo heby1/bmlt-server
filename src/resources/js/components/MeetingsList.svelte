@@ -44,11 +44,12 @@
   let sortColumn: keyof Meeting | null = $state(null);
   let sortDirection: 'asc' | 'desc' = $state('asc');
   let lastEditedMeetingId: number | null = $state(null);
-  const daysOfWeek: string[] = [$translations.day0, $translations.day1, $translations.day2, $translations.day3, $translations.day4, $translations.day5, $translations.day6];
-  const weekdayChoices = daysOfWeek.map((day: string, index: number) => ({
-    value: index.toString(),
-    label: day
-  }));
+  const daysOfWeek: string[] = $derived([$translations.day0, $translations.day1, $translations.day2, $translations.day3, $translations.day4, $translations.day5, $translations.day6]);
+  const weekdayChoices = $derived(
+    daysOfWeek
+      .map((day: string, index: number) => ({ value: index.toString(), label: day }))
+      .sort((a, b) => ($translations.getLanguage() === 'fi' ? ((Number(a.value) + 6) % 7) - ((Number(b.value) + 6) % 7) : Number(a.value) - Number(b.value)))
+  );
 
   let selectedDays: string[] = $state(weekdayChoices.map((day) => day.value));
   const timeChoices = [
@@ -119,8 +120,8 @@
       .sort((a, b) => {
         // Apply custom sorting if a sort column is selected
         if (sortColumn && sortColumn in a) {
-          const valA = a[sortColumn];
-          const valB = b[sortColumn];
+          const valA = sortColumn === 'day' && $translations.getLanguage() === 'fi' ? (a.day + 6) % 7 : a[sortColumn];
+          const valB = sortColumn === 'day' && $translations.getLanguage() === 'fi' ? (b.day + 6) % 7 : b[sortColumn];
 
           if (valA === undefined && valB === undefined) return 0;
           if (valA === undefined) return sortDirection === 'asc' ? 1 : -1;
@@ -141,8 +142,8 @@
           return sortDirection === 'asc' ? strA.localeCompare(strB) : strB.localeCompare(strA);
         }
 
-        // Default sort by day then time (your original sorting)
-        const dayComparison = a.day - b.day;
+        // Finnish presentation starts the week on Monday; stored weekday IDs stay unchanged.
+        const dayComparison = $translations.getLanguage() === 'fi' ? ((a.day + 6) % 7) - ((b.day + 6) % 7) : a.day - b.day;
         if (dayComparison !== 0) return dayComparison;
         return (a.startTime || '').localeCompare(b.startTime || '');
       })

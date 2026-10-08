@@ -6,6 +6,7 @@ import userEvent from '@testing-library/user-event';
 import App from '../App.svelte';
 import { sharedAfterEach, sharedBeforeAll, sharedBeforeEach } from './sharedDataAndMocks';
 import { translations } from '../stores/localization';
+import { string } from 'yup';
 
 beforeAll(sharedBeforeAll);
 beforeEach(sharedBeforeEach);
@@ -75,6 +76,13 @@ describe('language selection tests', () => {
 });
 
 describe('translations tests', () => {
+  test('selecting Finnish translates UI labels and validation messages', async () => {
+    translations.setLanguage('fi');
+    expect(translations.getAvailableLanguages()).toContain('fi');
+    expect(translations.getString('loginVerb')).toBe('Kirjaudu sisään');
+    await expect(string().required().validate('')).rejects.toThrow('kenttä on pakollinen');
+  });
+
   test('test that the same keys exist for all languages', () => {
     const allTranslations = translations.getTranslationsForAllLanguages();
     const languages = Object.keys(allTranslations);

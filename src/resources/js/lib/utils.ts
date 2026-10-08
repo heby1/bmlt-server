@@ -52,6 +52,7 @@ export function convertTo12Hour(time: string): string {
 }
 
 export function is24hrTime(): boolean {
+  if (translations.getLanguage() === 'fi') return true;
   const date = new Date();
   const timeString = date.toLocaleTimeString();
   return !(timeString.includes('AM') || timeString.includes('PM'));

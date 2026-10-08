@@ -41,7 +41,7 @@
 
   let { selectedMeeting, serviceBodies, formats, onSaved, onDeleted }: Props = $props();
 
-  const daysOfWeek: string[] = [$translations.day0, $translations.day1, $translations.day2, $translations.day3, $translations.day4, $translations.day5, $translations.day6];
+  const daysOfWeek: string[] = $derived([$translations.day0, $translations.day1, $translations.day2, $translations.day3, $translations.day4, $translations.day5, $translations.day6]);
 
   const tabs = selectedMeeting
     ? [$translations.tabsBasic, $translations.tabsLocation, $translations.tabsOther, $translations.tabsChanges]
@@ -55,7 +55,8 @@
       if (en_translation && ignoredFormatKeys.includes(en_translation.key)) {
         return null;
       }
-      const translation = format.translations.find((t) => t.language === translations.getLanguage());
+      const language = translations.getLanguage();
+      const translation = format.translations.find((t) => t.language === language) ?? (language === 'fi' ? en_translation : undefined);
       if (translation) {
         return {
           id: format.id,
@@ -87,10 +88,9 @@
   let isPublishedChecked = $state(true);
   let showDeleteModal = $state(false);
   let meetingToDelete: Meeting | undefined = $state();
-  const weekdayChoices = daysOfWeek.map((day: string, index: number) => ({
-    value: index,
-    name: day
-  }));
+  const weekdayChoices = $derived(
+    daysOfWeek.map((day: string, index: number) => ({ value: index, name: day })).sort((a, b) => ($translations.getLanguage() === 'fi' ? ((a.value + 6) % 7) - ((b.value + 6) % 7) : a.value - b.value))
+  );
   const statesAndProvincesChoices = settings.meetingStatesAndProvinces
     .map((state) => ({
       value: state,

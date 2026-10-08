@@ -160,9 +160,37 @@ Compatibility limits are visible rather than hidden:
 - A map link can point at an old venue even when its coordinates parse. The
   curated review list records confirmed mismatches and location clarifications.
 
-Finnish admin/UI translation and investigation of the WordPress placeholder/count
-bug remain later work. The three empty source placeholders disappeared before
+Investigation of the WordPress placeholder/count bug remains later work.
+The three empty source placeholders disappeared before
 the refreshed 240-meeting snapshot; their history stays in the human review list.
+
+## Finnish localization
+
+Finnish is available in the language selector. This fork's root `.env.example`
+sets the native BMLT `LANGUAGE=fi` setting; use the same setting in the local or
+production environment to make Finnish the default. Upstream's fallback remains
+English. A previously selected browser language, stored as `bmltLanguage`, takes
+precedence; choose **Suomi** to change it.
+
+Finnish views use a 24-hour clock and Monday-first weekday choices and meeting
+sorting. Stored weekdays remain Sunday = 0 through Saturday = 6, preserving API
+and import compatibility. Dates and timestamps use Finnish presentation.
+
+All **303** keys and English texts in the supplied `translations.xlsx` exactly
+matched `src/resources/js/lang/en.ts`. The workbook now retains columns A (key)
+and B (English), and adds C (**Suomi**) matching `fi.ts`. This also preserves the
+existing spreadsheet import convention. Runtime translations come from the code;
+editing the workbook alone does not change the application.
+
+The workbook does not include the **36 Yup validation messages**, translated in
+`fi.ts`, or the **178 backend strings** in nine `src/lang/fi` files copied from
+English. It also does not contain database format names/descriptions. Imported
+custom formats already have Finnish metadata. Stock formats without Finnish
+metadata remain visible using their English metadata; translating that catalog
+is separate from the UI workbook. The legacy `GetSearchResults` endpoint already
+falls back to English format metadata. `GetFormats` filters by the requested
+language; clients needing the complete stock catalog should explicitly request
+`lang_enum=en` until that catalog has Finnish translations.
 
 ### Changes needed for fuller compatibility
 
@@ -273,7 +301,7 @@ checkout is insufficient.
 Create production runtime configuration **after** building/uploading, using
 injected private environment variables if the host supports them or the normal
 Laravel `main_server/.env`. Configure production DB host/database/user/password,
-`DB_PREFIX`, a persistent `APP_KEY`, `APP_DEBUG=false`, the bootstrap admin
+`DB_PREFIX`, a persistent `APP_KEY`, `APP_DEBUG=false`, `LANGUAGE=fi`, the bootstrap admin
 password, and an absolute `NASUOMI_STATE_DIR` **outside `public_html`**. Existing
 environment-backed auto-config handling is retained; do not maintain conflicting
 DB values in both environment and a legacy `auto-config.inc.php`.

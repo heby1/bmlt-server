@@ -1,5 +1,25 @@
-import { describe, it, expect } from 'vitest';
-import { stripLegacyFieldSeparator } from '../lib/utils';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import { is24hrTime, stripLegacyFieldSeparator } from '../lib/utils';
+import { translations } from '../stores/localization';
+
+describe('Finnish clock format', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    translations.setLanguage('en');
+  });
+
+  it('uses a 24-hour clock even when the browser uses AM/PM', () => {
+    vi.spyOn(Date.prototype, 'toLocaleTimeString').mockReturnValue('6:30:00 PM');
+    translations.setLanguage('fi');
+    expect(is24hrTime()).toBe(true);
+  });
+
+  it('preserves browser clock preferences for other languages', () => {
+    vi.spyOn(Date.prototype, 'toLocaleTimeString').mockReturnValue('6:30:00 PM');
+    translations.setLanguage('en');
+    expect(is24hrTime()).toBe(false);
+  });
+});
 
 describe('stripLegacyFieldSeparator', () => {
   it('should strip legacy separator and return value', () => {

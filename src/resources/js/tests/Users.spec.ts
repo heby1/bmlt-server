@@ -127,7 +127,7 @@ describe('check editing, adding, and deleting users using the popup dialog boxes
     expect(b).toBeDisabled();
     const userType = screen.getByRole('combobox', { name: 'User Type' }) as HTMLSelectElement;
     expect(userType.value).toBe('serviceBodyAdmin');
-    await userEvent.selectOptions(userType, ['Observer']);
+    await userEvent.selectOptions(userType, ['observer']);
     expect(userType.value).toBe('observer');
     const ownedBy = screen.getByRole('combobox', { name: 'Owned By' }) as HTMLSelectElement;
     expect(ownedBy.value).toBe('2'); // id of Northern Zone
