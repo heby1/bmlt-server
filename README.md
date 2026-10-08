@@ -43,6 +43,11 @@ DEVELOPMENT
 For specific information on setting up a development environment for work on the BMLT server, please
 see [CONTRIBUTING.md](CONTRIBUTING.md) in the GitHub repository.
 
+For this fork's Finnish WordPress mirror, see [FINNISH_MIGRATION.md](FINNISH_MIGRATION.md)
+for local Docker setup, the PHP sync command and SiteGround deployment. Meetings
+needing manual review are listed separately in
+[FINNISH_MEETING_FLAGS.md](FINNISH_MEETING_FLAGS.md).
+
 LICENSE
 -------
 

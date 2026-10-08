@@ -14,3 +14,6 @@ secrets.auto.tfvars
 build
 docker/docker-compose.dev.yml
 .vscode
+/.env
+/var/nasuomi
+/nasuomi-state

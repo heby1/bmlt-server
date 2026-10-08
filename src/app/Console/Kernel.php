@@ -19,7 +19,12 @@ class Kernel extends ConsoleKernel
      */
     protected function schedule(Schedule $schedule)
     {
-        // $schedule->command('inspire')->hourly();
+        if (config('nasuomi.schedule_enabled')) {
+            $schedule->command('nasuomi:sync')
+                ->dailyAt(config('nasuomi.sync_time'))
+                ->timezone('Europe/Helsinki')
+                ->withoutOverlapping();
+        }
     }
 
     /**

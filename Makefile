@@ -9,6 +9,7 @@ NODE_MODULES := src/node_modules/.package-lock.json
 FRONTEND := src/public/build/manifest.json
 ZIP_FILE := build/bmlt-server.zip
 EXTRA_DOCKER_COMPOSE_ARGS :=
+FI_COMPOSE := docker compose --env-file .env -p bmlt-fi -f docker/docker-compose.yml -f docker/docker-compose.fi.yml
 COMPOSER_IN_CONTAINER := docker run --pull=always -t --rm -v '$(shell pwd)':/code -w /code $(BASE_IMAGE):$(BASE_IMAGE_TAG)
 ifeq ($(CI)x, x)
 	DOCKERFILE := Dockerfile-debug
@@ -131,6 +132,16 @@ docker-push: zip ## Builds and pushes multi-arch Docker image to Dockerhub
 .PHONY: dev
 dev: zip ## Docker Compose Up
 	docker compose -f docker/docker-compose.yml $(EXTRA_DOCKER_COMPOSE_ARGS) up --build
+
+.PHONY: dev-fi
+dev-fi: NPM_FLAG := ci
+dev-fi: zip ## Runs the Finnish mirror with an empty persistent database
+	mkdir -p var/nasuomi
+	$(FI_COMPOSE) up --build
+
+.PHONY: down-fi
+down-fi: ## Stops the Finnish mirror while retaining its database and state
+	$(FI_COMPOSE) down
 
 .PHONY: test
 test:  ## Runs PHP Tests

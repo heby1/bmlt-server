@@ -1,0 +1,41 @@
+# Requires Docker Compose 2.24.4 or later. Run from the repository root.
+services:
+  bmlt:
+    ports: !override
+      - "127.0.0.1:${BMLT_PORT:-8000}:8000"
+    env_file:
+      - ../.env
+    environment:
+      APP_DEBUG: ${APP_DEBUG:-true}
+      APP_KEY: ${APP_KEY:?Set APP_KEY in .env}
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_DATABASE: ${DB_DATABASE:-rootserver}
+      DB_USERNAME: ${DB_USERNAME:-rootserver}
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      DB_PREFIX: ${DB_PREFIX:-na}
+      NASUOMI_STATE_DIR: /var/lib/bmlt-nasuomi
+    volumes:
+      - ${NASUOMI_STATE_DIR:?Set an absolute NASUOMI_STATE_DIR in .env}:/var/lib/bmlt-nasuomi
+    depends_on:
+      db:
+        condition: service_healthy
+  db:
+    build: !reset null
+    image: mariadb:latest
+    ports: !reset []
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:?Set MARIADB_ROOT_PASSWORD in .env}
+      MARIADB_DATABASE: ${DB_DATABASE:-rootserver}
+      MARIADB_USER: ${DB_USERNAME:-rootserver}
+      MARIADB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+    volumes:
+      - fi-db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  fi-db-data:
