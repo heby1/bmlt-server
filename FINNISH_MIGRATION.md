@@ -64,6 +64,19 @@ Open `http://127.0.0.1:8000/main_server/` and log in with `NASUOMI_ADMIN_USERNAM
 locally by default. `make down-fi` stops the stack and retains its database and
 state. Repeated imports update the same WordPress-owned records.
 
+For an explicitly authorized clean import of the **disposable local database**:
+
+```sh
+docker compose --env-file .env -p bmlt-fi -f docker/docker-compose.yml -f docker/docker-compose.fi.yml exec -T -w /var/www/html/main_server bmlt php artisan migrate:fresh --force
+docker compose --env-file .env -p bmlt-fi -f docker/docker-compose.yml -f docker/docker-compose.fi.yml exec -T --user "$(id -u):$(id -g)" -w /var/www/html/main_server bmlt php artisan nasuomi:sync --initialize-only
+docker compose --env-file .env -p bmlt-fi -f docker/docker-compose.yml -f docker/docker-compose.fi.yml exec -T --user "$(id -u):$(id -g)" -w /var/www/html/main_server bmlt php artisan nasuomi:sync
+```
+
+This resets the entire selected database, not just a table prefix, and recreates
+the admin account using the bootstrap credentials in `.env`. Private coordinate
+cache, overrides and source snapshots remain intact. Run this only against the
+disposable local database.
+
 Using the host UID/GID keeps private sync files readable by the local account.
 Run database tests in a separate disposable database, such as `rootserver_test`,
 granting the same Docker database user access first. Laravel's `RefreshDatabase`
@@ -84,7 +97,7 @@ The target remains disposable, but changes are limited to source-owned meetings.
 | --- | --- |
 | Unique post ID | Native `source_id`; each post is a distinct meeting, including repeated names. No fabricated group record. |
 | Ownership | One **Suomen alue** area service body. Imported meetings have no associated BMLT root server. Other/manual meetings are outside sync ownership. |
-| Finnish geographical area | Preserve Etelä/Keski/Länsi/Itä/Pohjoinen/Internet/Ulkomaat in source notes. Do not invent service bodies for these browsing categories. |
+| Finnish geographical area | Do not copy WordPress Alue into BMLT text fields. Keep the existing Internet-area check for virtual venue classification; do not invent service bodies for browsing categories. |
 | Title | Decode HTML entities and retain Finnish characters/emoji. |
 | Weekday/start | Finnish weekday names become native weekdays; accept both `18.00` and `18:00`. |
 | Duration | Minutes become native duration. `0` means unspecified and is stored as NULL; it is not automatically an Open-Ended format. |
@@ -93,13 +106,20 @@ The target remains disposable, but changes are limited to source-owned meetings.
 | Equivalent formats | A&P → **St + Tr**, Askel → St, Teema → To, Meditaatio → ME, Perinnekokous → Tr, Esteetön pääsy → WC; closed literature combines C + BK. A&P does not mean the native IW book format. |
 | Non-equivalent source labels | Preserve their meaning as native custom Finnish formats, including conditional openness, negative accessibility, written step work and treatment-facility venues. Unknown labels remain visible and reported. |
 | Relationship strings | Rendered text, not relationship IDs. A comma can belong inside a label. Two different source definitions render as Tarvittaessa avoin. An empty format relationship remains unspecified; it does not imply closed attendance. |
-| Extra information | Preserve normalized readable Finnish/English notes, links and emoji using existing normal/long text storage; retain the original HTML in source snapshots. Do not infer attendance or calendar policies from prose. |
-| Pause | Publish with the native custom **Tauolla** format and a notice. `Kyllä` means indefinite pause; a future resume date pauses the meeting before that date, resuming on the specified date. Expired dates alone do not pause a meeting. |
+| Source permalink | **Kommentit / `comments`** contains only `Lähde: <WordPress permalink>`. |
+| Extra information | **Lisätiedot / `location_info`** contains only parsed plain text from WordPress `lisatiedot`. Paragraph, `<br>` and block boundaries become spaces; collapse whitespace while preserving actual note content, link URLs and emoji. Use existing normal/long text storage and retain original HTML in source snapshots. |
+| English extra-information field | Retain `lisatiedot_en` in the raw source snapshot; do not append it to BMLT text fields. |
+| Pause | Publish with the native custom **Tauolla** format and record a runtime warning. `Kyllä` means indefinite pause; a future resume date pauses the meeting before that date, resuming on the specified date. Expired dates alone do not pause a meeting. Preserve any pause wording actually supplied in `lisatiedot`. |
 | Internet meeting | Native virtual venue, joining URL, no invented physical location or coordinates. |
-| Physical coordinates | Accept explicit target coordinates in source/map redirect URLs, a matching cache entry, or an address-bound manual override. Reject map camera positions and 0,0. |
+| Physical coordinates | Prefer the actual location linked by the source map URL, including a nearby pin whose label differs from the postal address. Accept explicit place/route-target coordinates, the identified Google embedded-map target, a matching cache entry or an address-bound manual override. Reject viewport positions, unrelated HTML points and 0,0. |
 | Unresolved physical meeting | Skip and report it; if an owned previously imported meeting becomes invalid/unresolved, remove that owned copy after a complete successful fetch. Usable meetings continue importing. |
 | Timezone | Europe/Helsinki for Finnish/Internet meetings. The Spain meeting provisionally uses Europe/Madrid and is flagged for organizer confirmation. |
 | Removal/unpublishing | A post absent from a complete published source snapshot removes its owned BMLT copy. Fetch failure or inconsistent pagination makes no meeting changes. |
+
+On 9 October 2026, the source maintainer corrected all 15 previously missing or
+malformed postcodes. The refreshed 240-meeting API has no remaining physical
+meeting postcode issues; the human review list retains the verified corrections
+as resolved history. Internet meetings do not require a physical postcode.
 
 Weekday numbering differs between storage and the public legacy API:
 
@@ -124,17 +144,20 @@ The added formats use existing BMLT format records and Finnish/English metadata:
 | Tarvittaessa avoin | OREQUEST |
 | Askeltyökokous | STEPWORK |
 | Ei pääsyä pyörätuolilla | NOWHEEL |
-| Esteellinen | OBSTRUCT |
 | Tila ei ole esteetön | NOACCESS |
 | Laitos | INST |
 | Ryhmässä kerran kuussa alustaja, joka jakaa kokemustaan n.15min | MONSPKR |
 | ruotsi / venäjä | SWE / RUS (language formats) |
-| Derived pause notice | PAUSED (English metadata), TAUOLLA (Finnish metadata) |
+| Derived pause status | PAUSED (English metadata), TAUOLLA (Finnish metadata) |
 
 These keys preserve source labels without making them equivalent to a broader
-upstream format. The ambiguous Esteellinen definition remains a human review
-item. Newly encountered labels receive a deterministic custom key and appear in
-the run report; raw format/language strings also remain in meeting comments.
+upstream format. On 9 October 2026, the source maintainer confirmed that the old
+label **Esteellinen** meant **Tila ei ole esteetön**, removed the obsolete source
+format and moved NA-Joensuu (2068) and SavoNAiset (8980) to the current label.
+Both use NOACCESS; their wording question is resolved. This confirms the label's
+meaning, not a separate assessment of either venue's accessibility. Newly
+encountered labels receive a deterministic custom key and appear in the run
+report. Raw format/language strings remain in the complete source snapshot.
 
 The stock BMLT model describes **weekly recurring meetings**. Notes currently
 contain fortnightly/monthly attendance, one-off venue/time changes, phase-based
@@ -147,9 +170,10 @@ Compatibility limits are visible rather than hidden:
 - The legacy search API substitutes its default duration when native duration is
   NULL. Consumers can therefore see a conventional duration for an unspecified
   source duration.
-- TSML export does not carry every custom Finnish format. Consumers of that
-  export must also consult notes; exact custom meanings are available through
-  native BMLT format/search interfaces.
+- TSML export does not carry every custom Finnish format. Source notes are in
+  `location_info` (TSML `location_notes`); `comments` (TSML `notes`) contains the
+  source link only. Exact custom meanings are available through native BMLT
+  format/search interfaces.
 - Virtual NULL coordinates are valid. Some existing admin/location editing
   workflows assume coordinates; importing virtual records is supported, but
   using those editors may require separate upstream work.
@@ -157,12 +181,34 @@ Compatibility limits are visible rather than hidden:
   source records without a postcode have a city but no province; they can be
   imported through native repositories, but an unchanged admin API edit can fail
   its address validation.
-- A map link can point at an old venue even when its coordinates parse. The
-  curated review list records confirmed mismatches and location clarifications.
+- A large discrepancy between an actual linked point and the meeting location
+  needs human review. A nearby pin with a different postal-address label is not
+  automatically an error. The curated list records accepted linked targets and
+  separate organizer/location clarifications.
 
 Investigation of the WordPress placeholder/count bug remains later work.
 The three empty source placeholders disappeared before
 the refreshed 240-meeting snapshot; their history stays in the human review list.
+
+### Maintaining Lisätiedot
+
+Edit the meeting's **Lisätiedot** field in WordPress (`lisatiedot`). The next
+complete sync replaces BMLT **Lisätiedot** (`location_info`) with readable text
+from that field. HTML paragraphs, line breaks and block boundaries become spaces;
+whitespace collapses to single spaces because the existing BMLT editor uses a
+single-line input. Links retain their URLs and emoji remain intact. An empty
+source field produces empty BMLT Lisätiedot.
+
+The imported text is the source note itself. Format and language relationships
+are represented by native formats; Lisätiedot receives no generated English,
+pause, venue, source, area, format or language metadata. **Kommentit** is reserved
+for the source permalink. Do not infer attendance or calendar policies from
+either field. Changes made only in BMLT are replaced on the next sync.
+
+After updating this importer, run the normal `nasuomi:sync` command. It updates
+the existing owned records in place: previous generated metadata is removed from
+both text fields, source notes move to Lisätiedot, and Kommentit becomes the source
+link alone. No database schema change or separate cleanup migration is needed.
 
 ## Finnish localization
 
@@ -205,7 +251,7 @@ corrections are appropriate when the source itself is wrong or incomplete.
 | Unspecified or variable ending | Permit NULL duration in admin writes and preserve it in public export instead of substituting a default. | Set a duration only when organizers confirm an actual fixed ending; otherwise retain unspecified duration. |
 | Long meaningful notes | Raise admin API/editor limits to match existing long-text storage. | Remove genuinely obsolete or duplicated notices after review; do not truncate relevant text to satisfy BMLT limits. |
 | Finnish addresses without province/postcode | Accept verified street/city/coordinates without requiring a fabricated province. | Supply verified missing postcodes and correct malformed six-digit values. |
-| Unresolved or stale map links | Continue reviewed coordinate overrides; any future geocoding provider needs a separate choice. | Correct stale links or expose verified point coordinates in WordPress after approving that source schema change. |
+| Unresolved linked locations or large point discrepancies | Continue target extraction and reviewed coordinate overrides; a separate future geocoding provider needs its own choice. | Correct a confirmed wrong link or expose verified point coordinates in WordPress after approving that source schema change. |
 | Pauses | Clients honor Tauolla; a future pause-until field would support accurate calendar filtering and automatic resumption. | Clarify far-future dates and indefinite flags; keep structured pause data current. |
 | Attendance/accessibility nuances | Use exact custom descriptions rather than broad women-only, men-only, child-friendly or fully accessible assumptions. | Organizers confirm actual audience, age limits, entrance and toilet accessibility separately. |
 | Rendered relationship labels | Keep explicit mappings; stable relationship identifiers would remove ambiguous comma/join parsing. | Expose relationship IDs with labels through REST if that API change is later approved. |
@@ -221,6 +267,38 @@ coordinate results persist while their source location matches. New or changed
 locations are resolved once and cached, instead of following map redirects daily.
 Failures and source discrepancies remain recorded on each run.
 
+### Resolving linked locations
+
+Use the source **map link** as the best available location evidence. The source
+maintainer confirmed that the Messukatu 4 pin for Jyväskylä meetings 782/912 is
+preferred even though their postal address is Lutakonaukio 3. Nearby address-label
+differences alone do not establish a bad link. Preserve the postal fields as
+supplied; reserve human review for large discrepancies in the actual point.
+
+Follow **GET** redirects: `share.google` can return a generic token destination
+to HEAD while GET reveals the real linked Google Search query/place. When the
+linked URL supplies a Google CID, `ludocid` or feature ID, request the embedded
+map by **CID alone**; including `q` can select a different nearby address pin.
+Otherwise use the linked query or named location, including the name encoded in
+a Fonecta link's path. Do not replace it with an independently geocoded WordPress
+postal address.
+
+Google's `output=embed` page contains `initEmbed` JSON. Extract only the single
+identified target record `[place ID, place label, [latitude, longitude]]`; ignore
+viewport arrays and unrelated coordinates elsewhere in HTML. Explicit Google
+route-destination tokens are also usable. Fonecta longitude/latitude parameters
+can describe the viewport: meeting 1591 resolves from its named Veturitallinpolku
+4 target, while its distant viewport is discarded.
+
+The manual audit on **9 October 2026** resolved all 42 previous coordinate
+extraction cases through their linked targets. The updated PHP command imported
+all **240 source meetings locally with zero skips**, and a second sync reported
+240 unchanged. All 42 recovered points matched the independent linked-target
+audit. Their evidence remains in the human review list. This uses existing
+public map pages with **no API keys, separate geocoding service or dependencies**.
+Google's response format is undocumented and may change. Failed or ambiguous
+extraction remains reported, with verified manual overrides available.
+
 | Environment variable | Purpose / default |
 | --- | --- |
 | `NASUOMI_SOURCE_URL` | Published WordPress meeting endpoint. |
@@ -230,6 +308,7 @@ Failures and source discrepancies remain recorded on each run.
 | `NASUOMI_INITIAL_ADMIN_PASSWORD` | Required explicit bootstrap password; do not use the upstream example password. |
 | `NASUOMI_SYNC_TIME` | Local Finnish schedule time, default `04:15`. |
 | `NASUOMI_SCHEDULE_ENABLED` | Scheduler opt-in, default `false`. |
+| `NASUOMI_ALERT_EMAIL` | Optional private recipient for failed/partial normal syncs; blank disables email. Uses existing Laravel `MAIL_*` settings. |
 
 State files are `snapshots/<timestamp>-source.json`,
 `reports/<timestamp>-report.json`, and `coordinates.json`. A dry run retrieves and
@@ -246,6 +325,10 @@ Exit status **0** means all records were usable (or initialization completed),
 unchanged. A dry run can also return 2.
 An unresolved lookup is cached for six hours; subsequent runs retry it. Successful
 coordinates have no expiry while WP ID, normalized address and map URL match.
+Resolver version **2** retries negative entries from the older extractor
+immediately, while retaining matching successful coordinates. This allows the
+expanded linked-target extraction to run without waiting for old negative results
+to expire or deleting the durable coordinate cache.
 
 Manual coordinate overrides are keyed by WP ID and carry an `address`,
 `latitude` and `longitude`. The address must exactly match the current normalized
@@ -274,7 +357,18 @@ geocoding provider would need a separate informed choice.
 checklist. Updating source information or resolving a human question does not
 authorize a daily job to rewrite that document or its review notes.
 
+Optional email alerts use the existing Laravel mail transport. Failed or partial
+normal imports send a summary; successful imports, dry runs and initialization
+stay silent. Keep recipient/mail credentials private, and verify the host's SMTP
+or sendmail delivery before relying on alerts. Mail failure warns without changing
+the sync outcome. See the [SiteGround handoff](SITEGROUND_DEPLOYMENT.md) for setup.
+
 ## SiteGround deployment and scheduling
+
+The practical deployment checklist is [SITEGROUND_DEPLOYMENT.md](SITEGROUND_DEPLOYMENT.md).
+Production uses **https://www.nasuomi.org/bmltfi/**; local Docker continues using
+`/main_server/`. Use [deployment/siteground.env.example](deployment/siteground.env.example)
+as the production configuration template, completed privately after upload.
 
 Production needs Apache, PHP **8.3+** with the modules listed in README, a MySQL
 database, and PHP CLI for cron. A bare database does not publish BMLT search APIs.
@@ -286,21 +380,24 @@ existing ZIP can be stale after a PHP-only change:
 
 ```sh
 make clean
-CI=1 CONTAINER=1 make zip
+ASSET_URL=/bmltfi CI=1 CONTAINER=1 make zip
 ```
 
 `make clean` removes generated dependencies/assets and the ZIP; it does not remove
-the root runtime `.env` or private sync state. Before building, ensure `src/.env`
+the root runtime `.env` or private sync state. `ASSET_URL=/bmltfi` builds the
+frontend's dynamic assets for the approved deployment subdirectory. Before
+building, ensure `src/.env`
 is absent and all secrets/state live outside
 `src/`. Inspect `build/bmlt-server.zip` for environment/state files before upload.
-Upload that ZIP and extract it on the server as `public_html/main_server`, as in
+Upload that ZIP, extract its upstream `main_server` directory, then rename it to
+`public_html/bmltfi` for the agreed production URL. See the
 [upstream installation instructions](installation/README.md). Bundled Composer
 dependencies and compiled front-end assets are needed; uploading an unbuilt Git
 checkout is insufficient.
 
 Create production runtime configuration **after** building/uploading, using
 injected private environment variables if the host supports them or the normal
-Laravel `main_server/.env`. Configure production DB host/database/user/password,
+Laravel `bmltfi/.env`. Configure production DB host/database/user/password,
 `DB_PREFIX`, a persistent `APP_KEY`, `APP_DEBUG=false`, `LANGUAGE=fi`, the bootstrap admin
 password, and an absolute `NASUOMI_STATE_DIR` **outside `public_html`**. Existing
 environment-backed auto-config handling is retained; do not maintain conflicting
@@ -308,12 +405,12 @@ DB values in both environment and a legacy `auto-config.inc.php`.
 
 Keep the runtime environment readable only by the hosting account. Existing
 Apache rewrites protect application files; verify that a request to
-`/main_server/.env` returns 403/404 before exposing the configured deployment.
+`/bmltfi/.env` returns 403/404 before exposing the configured deployment.
 The account needs write access to Laravel `storage`, `bootstrap/cache` and the
 private state directory. Preserve production environment/state when replacing
 the release directory.
 
-Using the host's PHP 8.3+ CLI binary, in `main_server`, run `php artisan migrate
+Using the host's PHP 8.3+ CLI binary, in `bmltfi`, run `php artisan migrate
 --force`, then initialization, dry run and a manual first sync as shown above
 without the Docker prefix. Confirm the
 public BMLT API and admin login before enabling scheduled imports. No production
@@ -330,7 +427,7 @@ For a cron service operating in **UTC**, use the two checks required by Finnish
 daylight saving time, replacing paths with the SiteGround account's real paths:
 
 ```cron
-15 1,2 * * * cd /absolute/path/public_html/main_server && /absolute/path/to/php83 artisan schedule:run >> /absolute/private/nasuomi/cron.log 2>&1
+15 1,2 * * * cd /absolute/path/public_html/bmltfi && /absolute/path/to/php83 artisan schedule:run >> /absolute/private/nasuomi/cron.log 2>&1
 ```
 
 Laravel schedules the command in `Europe/Helsinki`: 01:15 UTC is 04:15 in summer,

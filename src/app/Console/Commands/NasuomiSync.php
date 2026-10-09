@@ -15,9 +15,11 @@ use DOMDocument;
 use DOMElement;
 use DOMNode;
 use Illuminate\Console\Command;
+use Illuminate\Mail\Message;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Mail;
 use RuntimeException;
 use Throwable;
 
@@ -53,7 +55,6 @@ class NasuomiSync extends Command
         'Tarvittaessa avoin' => ['OREQUEST', 'O'],
         'Askeltyökokous' => ['STEPWORK', 'FC1'],
         'Ei pääsyä pyörätuolilla' => ['NOWHEEL', 'FC2'],
-        'Esteellinen' => ['OBSTRUCT', 'FC2'],
         'Tila ei ole esteetön' => ['NOACCESS', 'FC2'],
         'Laitos' => ['INST', 'FC3'],
         'Ryhmässä kerran kuussa alustaja, joka jakaa kokemustaan n.15min' => ['MONSPKR', 'FC1'],
@@ -75,6 +76,7 @@ class NasuomiSync extends Command
         UserRepositoryInterface $users,
     ): int {
         $locked = false;
+        $lockName = null;
         $runId = Carbon::now('UTC')->format('Ymd-His-u');
         $report = ['run' => $runId, 'source_url' => config('nasuomi.source_url'), 'dry_run' => (bool) $this->option('dry-run')];
         try {
@@ -149,6 +151,7 @@ class NasuomiSync extends Command
             $this->writeJson('reports/' . $runId . '-report.json', $report);
             $this->pruneState();
             $this->line('Report: ' . $this->stateDirectory . '/reports/' . $runId . '-report.json');
+            $this->sendFailureAlert($report);
             return !empty($report['skipped']) ? 2 : self::SUCCESS;
         } catch (Throwable $e) {
             $report['status'] = 'failed';
@@ -162,11 +165,69 @@ class NasuomiSync extends Command
                 }
             }
             $this->error($e->getMessage());
+            $this->sendFailureAlert($report, $e);
             return self::FAILURE;
         } finally {
             if ($locked) {
                 DB::select('SELECT RELEASE_LOCK(?)', [$lockName]);
             }
+        }
+    }
+
+    private function sendFailureAlert(array $report, ?Throwable $exception = null): void
+    {
+        $recipient = trim((string) config('nasuomi.alert_email'));
+        if (
+            $recipient === '' || $this->option('dry-run') || $this->option('initialize-only')
+            || !in_array($report['status'] ?? '', ['failed', 'incomplete'], true)
+        ) {
+            return;
+        }
+        try {
+            $subject = 'Finnish BMLT sync ' . $report['status'];
+            $lines = [$subject, 'Time (UTC): ' . Carbon::now('UTC')->toIso8601String(), 'Run: ' . $report['run']];
+            $lines[] = 'Source meetings: ' . ($report['source_count'] ?? 'unavailable');
+            if (isset($report['skipped'])) {
+                $lines[] = 'Imported: ' . ($report['source_count'] - $report['skipped']) . '; skipped: ' . $report['skipped'];
+            }
+            if (isset($report['created'])) {
+                $lines[] = sprintf(
+                    'Created: %d; updated: %d; deleted: %d; unchanged: %d.',
+                    $report['created'],
+                    $report['updated'],
+                    $report['deleted'],
+                    $report['unchanged']
+                );
+            }
+            if (isset($report['error'])) {
+                // Database/transport exceptions can contain SQL values or credentials.
+                $error = $exception && get_class($exception) !== RuntimeException::class
+                    ? class_basename($exception) . ': see the local report for details.' : $report['error'];
+                foreach (
+                    [
+                        config('nasuomi.initial_admin_password'), config('app.key'),
+                        config('database.connections.' . config('database.default') . '.password'),
+                        config('mail.mailers.smtp.password'),
+                    ] as $secret
+                ) {
+                    if (is_string($secret) && $secret !== '') {
+                        $error = str_replace($secret, '[redacted]', $error);
+                    }
+                }
+                $lines[] = 'Error: ' . mb_substr(preg_replace('/\s+/u', ' ', $error), 0, 300);
+            }
+            $skipped = array_values(array_filter($this->flags, fn ($flag) => $flag['severity'] === 'skipped'));
+            foreach (array_slice($skipped, 0, 10) as $flag) {
+                $lines[] = 'Skipped WP ' . $flag['wp_id'] . ': ' . mb_substr(preg_replace('/\s+/u', ' ', $flag['reason']), 0, 200);
+            }
+            if (count($skipped) > 10) {
+                $lines[] = (count($skipped) - 10) . ' more skipped meetings are listed in the local report.';
+            }
+            $lines[] = 'Report: ' . (isset($this->stateDirectory) && $this->stateDirectory !== ''
+                ? $this->stateDirectory . '/reports/' . $report['run'] . '-report.json' : 'unavailable');
+            Mail::raw(implode("\n", $lines), fn (Message $message) => $message->to($recipient)->subject($subject));
+        } catch (Throwable) {
+            $this->warn('Could not send sync alert email. Check MAIL_* configuration and hosting mail delivery.');
         }
     }
 
@@ -331,7 +392,6 @@ class NasuomiSync extends Command
         $mapUrl = $this->string($row['karttalinkki'] ?? null);
         $virtual = $area === 'Internet' || mb_strtolower($city) === 'internet';
         $notes = $this->plainText($this->string($row['lisatiedot'] ?? null));
-        $english = $this->plainText($this->string($row['lisatiedot_en'] ?? null));
         $virtualUrl = $virtual ? $mapUrl : '';
         if (!$virtual && preg_match('~https?://(?:[a-z0-9.-]+\.)?(?:zoom\.us|discord\.gg|discord\.com)/[^\s<>\)]+~iu', $notes, $match)) {
             $virtualUrl = rtrim($match[0], '.,');
@@ -346,7 +406,7 @@ class NasuomiSync extends Command
         $address = implode(', ', array_filter([$street, $postalCode, $city, $country], fn ($v) => $v !== ''));
         $coordinates = $virtual ? null : $this->coordinates($row, $address, $mapUrl);
         if (!$virtual && !$coordinates) {
-            throw new RuntimeException('Unresolved map marker coordinates; no camera/map-center coordinates were substituted. Address: ' . $address);
+            throw new RuntimeException('Could not resolve the location in the source map link; retry or provide verified coordinates. Address: ' . $address);
         }
         $formatLabels = $this->relationLabels($this->string($row['rel_kokousmuodot'] ?? null), array_merge(array_keys(self::STOCK_FORMATS), array_keys(self::CUSTOM_FORMATS)));
         $languageLabels = $this->relationLabels($this->string($row['rel_kokouskielet'] ?? null), array_keys(self::LANGUAGES));
@@ -375,15 +435,7 @@ class NasuomiSync extends Command
             $keys[] = 'PAUSED';
             $this->flag($row, 'warning', 'paused', $pauseNotice . ' Meeting remains published with Tauolla format.');
         }
-        $comments = array_filter([$pauseNotice, $notes, $english ? "English:\n" . $english : '',
-            $formatLabels ? 'Kokousmuodot: ' . implode('; ', $formatLabels) : '',
-            $languageLabels ? 'Kokouskielet: ' . implode('; ', $languageLabels) : '',
-        ], fn ($v) => $v !== '');
-        $locationInfo = array_filter([
-            !$virtual && $mapUrl ? 'Kartta: ' . $mapUrl : '',
-            $this->string($row['link'] ?? null) ? 'Lähde: ' . $this->string($row['link']) : '',
-            $area ? 'NA-palvelualue: ' . $area : '',
-        ], fn ($v) => $v !== '');
+        $sourceLink = $this->string($row['link'] ?? null);
         if (!$minutes) {
             $this->flag($row, 'information', 'duration_unknown', 'Stored as NULL. The legacy BMLT API returns the configured default duration for unknown duration.');
         }
@@ -405,7 +457,7 @@ class NasuomiSync extends Command
             'meeting_name' => $name, 'location_text' => $virtual ? 'Internet' : '',
             'location_street' => $virtual ? '' : $street, 'location_municipality' => $virtual ? '' : $city,
             'location_postal_code_1' => $virtual ? '' : $postalCode, 'location_nation' => $country,
-            'location_info' => implode("\n", $locationInfo), 'comments' => implode("\n\n", $comments),
+            'location_info' => $notes, 'comments' => $sourceLink ? 'Lähde: ' . $sourceLink : '',
             'virtual_meeting_link' => $virtualUrl,
         ];
         foreach ($values as $field => $value) {
@@ -577,22 +629,27 @@ class NasuomiSync extends Command
         }
         $cacheKey = hash('sha256', $row['id'] . '|' . $address . '|' . $url);
         $cached = $this->coordinateCache[$cacheKey] ?? null;
-        if (is_array($cached) && (!empty($cached['coordinates']) || ($cached['checked_at'] ?? 0) > time() - 6 * 3600)) {
+        if (is_array($cached) && (!empty($cached['coordinates']) || (($cached['resolver_version'] ?? 0) >= 2 && ($cached['checked_at'] ?? 0) > time() - 6 * 3600))) {
             return $cached['coordinates'];
         }
         $coordinate = null;
         $resolvedUrl = $url;
+        $target = null;
         try {
             for ($redirects = 0; $redirects < 6; $redirects++) {
                 if (!$this->mapUrl($resolvedUrl)) {
                     break;
                 }
+                if ($coordinate = $this->markerCoordinates($resolvedUrl)) {
+                    break;
+                }
+                if ($target = $this->mapTarget($resolvedUrl)) {
+                    break;
+                }
                 $request = Http::connectTimeout(5)->timeout(15)->withOptions(['allow_redirects' => false])
                     ->withHeaders(['User-Agent' => 'BMLT-Finnish-Meeting-Sync/1.0']);
-                $response = $request->head($resolvedUrl);
-                if ($response->status() === 405) {
-                    $response = $request->get($resolvedUrl);
-                }
+                // Google share links can return a different, incomplete redirect to HEAD.
+                $response = $request->get($resolvedUrl);
                 if ($response->redirect()) {
                     $location = $response->header('Location');
                     if (!$location) {
@@ -602,20 +659,32 @@ class NasuomiSync extends Command
                     if (!$this->mapUrl($resolvedUrl)) {
                         break;
                     }
-                    if ($coordinate = $this->markerCoordinates($resolvedUrl)) {
-                        break;
-                    }
                     continue;
                 }
-                // HTML can contain unrelated places. Only the explicit redirect URL is trusted.
                 break;
             }
+            if (!$coordinate && $target) {
+                $response = Http::connectTimeout(5)->timeout(15)->withOptions(['allow_redirects' => [
+                    'max' => 3,
+                    'on_redirect' => function ($request, $response, $uri) {
+                        if (!$this->mapUrl((string) $uri)) {
+                            throw new RuntimeException('Untrusted map embed redirect.');
+                        }
+                    },
+                ]])
+                    ->withHeaders(['User-Agent' => 'BMLT-Finnish-Meeting-Sync/1.0'])
+                    ->get('https://maps.google.com/maps', ['output' => 'embed'] + (isset($target['cid']) ? ['cid' => $target['cid']] : $target));
+                if ($response->successful()) {
+                    $coordinate = $this->embeddedCoordinates($response->body());
+                }
+            }
         } catch (Throwable) {
-            $this->flag($row, 'warning', 'map_lookup_failed', 'Map redirect lookup failed; add verified coordinates or retry.');
+            $this->flag($row, 'warning', 'map_lookup_failed', 'Map location lookup failed; retry or provide verified coordinates.');
         }
         $this->coordinateCache[$cacheKey] = [
             'wp_id' => $row['id'], 'address' => $address, 'url' => $url,
             'resolved_url' => $resolvedUrl, 'coordinates' => $coordinate, 'checked_at' => time(),
+            'resolver_version' => 2, 'map_target' => $target,
         ];
         return $coordinate;
     }
@@ -633,14 +702,94 @@ class NasuomiSync extends Command
                 $matches[$marker[1] . ',' . $marker[2]] = [(float) $marker[1], (float) $marker[2]];
             }
         }
+        // Only this observed route shape has an empty origin and one explicit destination.
+        if (preg_match('~^/maps/dir//~', (string) parse_url($value, PHP_URL_PATH))) {
+            preg_match_all('/!2m2!1d(-?\d+(?:\.\d+)?)!2d(-?\d+(?:\.\d+)?)/', $decoded, $destinations, PREG_SET_ORDER);
+            if (count($destinations) === 1 && $this->validCoordinates($destinations[0][2], $destinations[0][1])) {
+                $matches[$destinations[0][2] . ',' . $destinations[0][1]] = [(float) $destinations[0][2], (float) $destinations[0][1]];
+            }
+        }
         // q/query identify a target; ll and @lat,lng identify the viewport and are not markers.
         parse_str((string) parse_url($value, PHP_URL_QUERY), $query);
-        foreach (['q', 'query'] as $key) {
+        foreach (['q', 'query', 'destination'] as $key) {
+            if ($key === 'destination' && !preg_match('~^/maps/dir(?:/|$)~', (string) parse_url($value, PHP_URL_PATH))) {
+                continue;
+            }
             if (isset($query[$key]) && is_string($query[$key]) && preg_match('/^(?:loc:)?\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/', $query[$key], $marker) && $this->validCoordinates($marker[1], $marker[2])) {
                 $matches[$marker[1] . ',' . $marker[2]] = [(float) $marker[1], (float) $marker[2]];
             }
         }
         return count($matches) === 1 ? reset($matches) : null;
+    }
+
+    private function mapTarget(string $url): ?array
+    {
+        $host = strtolower((string) parse_url($url, PHP_URL_HOST));
+        $path = (string) parse_url($url, PHP_URL_PATH);
+        parse_str((string) parse_url($url, PHP_URL_QUERY), $query);
+        if (in_array($host, ['fonecta.fi', 'www.fonecta.fi'], true)) {
+            return preg_match('~^/kartat/([^/]+)~', $path, $match) ? ['q' => rawurldecode($match[1])] : null;
+        }
+        if (!in_array($host, ['maps.google.com', 'maps.google.fi', 'google.com', 'www.google.com', 'google.fi', 'www.google.fi'], true) || $path === '/share.google') {
+            return null;
+        }
+        $target = [];
+        foreach (['q', 'query'] as $key) {
+            if (isset($query[$key]) && is_string($query[$key]) && trim($query[$key]) !== '') {
+                $target['q'] = $query[$key];
+                break;
+            }
+        }
+        if (!$target && preg_match('~^/maps/(?:place|search)/([^/]+)~', $path, $match)) {
+            $target['q'] = urldecode($match[1]);
+        }
+        $featureId = is_string($query['ftid'] ?? null) ? $query['ftid'] : '';
+        if ($featureId === '' && preg_match('/!1s(0x[0-9a-f]+:0x[0-9a-f]+)(?:!|\?|&|\/|$)/i', rawurldecode($url), $match)) {
+            $featureId = $match[1];
+        }
+        if (preg_match('/^0x[0-9a-f]+:0x([0-9a-f]{1,16})$/i', $featureId, $match)) {
+            $target['ftid'] = $featureId;
+            // Preserve all 64 CID bits; hexdec/base_convert can round through a float.
+            $target['cid'] = sprintf('%u', unpack('J', hex2bin(str_pad($match[1], 16, '0', STR_PAD_LEFT)))[1]);
+        }
+        foreach (['ludocid', 'cid'] as $key) {
+            if (isset($query[$key]) && is_string($query[$key]) && ctype_digit($query[$key])) {
+                $target['cid'] = $query[$key];
+                break;
+            }
+        }
+        return $target ?: null;
+    }
+
+    private function embeddedCoordinates(string $html): ?array
+    {
+        if (!preg_match('/initEmbed\((\[.*?\])\);/s', $html, $match)) {
+            return null;
+        }
+        $state = json_decode($match[1], true);
+        $place = $state[21][3][0] ?? null;
+        if (!is_array($place) || !preg_match('/^0x[0-9a-f]+:0x[0-9a-f]+$/i', $place[0] ?? '') || !is_string($place[1] ?? null) || !$this->validCoordinates($place[2][0] ?? null, $place[2][1] ?? null)) {
+            return null;
+        }
+        // Reject additional place records rather than picking the first of several candidates.
+        $pending = [$state];
+        $places = 0;
+        while ($pending) {
+            $entry = array_pop($pending);
+            if (is_string($entry[0] ?? null) && preg_match('/^0x[0-9a-f]+:0x[0-9a-f]+$/i', $entry[0]) && is_string($entry[1] ?? null) && $this->validCoordinates($entry[2][0] ?? null, $entry[2][1] ?? null)) {
+                $places++;
+            }
+            foreach ($entry as $child) {
+                if (is_array($child)) {
+                    $pending[] = $child;
+                }
+            }
+        }
+        if ($places !== 1) {
+            return null;
+        }
+        // This is the selected place record, not the separate map viewport in [21][0].
+        return [(float) $place[2][0], (float) $place[2][1]];
     }
 
     private function validCoordinates(mixed $latitude, mixed $longitude): bool
@@ -656,7 +805,7 @@ class NasuomiSync extends Command
         $host = strtolower((string) parse_url($url, PHP_URL_HOST));
         if (
             in_array($host, ['google.com', 'www.google.com', 'google.fi', 'www.google.fi'], true)
-            && !preg_match('~^/maps(?:/|$)~', (string) parse_url($url, PHP_URL_PATH))
+            && !preg_match('~^/(?:maps(?:/|$)|share\.google$|search$)~', (string) parse_url($url, PHP_URL_PATH))
         ) {
             return false;
         }
@@ -679,10 +828,8 @@ class NasuomiSync extends Command
         $document = new DOMDocument();
         $document->loadHTML('<?xml encoding="UTF-8">' . $html, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING);
         $text = $this->nodeText($document);
-        $text = str_replace(["\r", "\xc2\xa0"], ['', ' '], $text);
-        $text = preg_replace('/[ \t]+/u', ' ', $text);
-        $text = preg_replace('/ *\n */u', "\n", $text);
-        return trim(preg_replace('/\n{3,}/u', "\n\n", $text));
+        // BMLT edits these values in single-line inputs, which strip literal newlines.
+        return trim(preg_replace('/\s+/u', ' ', $text));
     }
 
     private function nodeText(DOMNode $node): string
@@ -708,8 +855,10 @@ class NasuomiSync extends Command
                     $text = trim($text) . ' (' . $href . ')';
                 }
             }
-            if ($tag === 'br' || in_array($tag, ['p', 'div', 'li', 'tr', 'h1', 'h2', 'h3', 'h4', 'blockquote'], true)) {
-                $text .= "\n";
+            if ($tag === 'br') {
+                $text = "\n";
+            } elseif (in_array($tag, ['p', 'div', 'li', 'ul', 'ol', 'table', 'tr', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'section', 'article', 'pre', 'hr'], true)) {
+                $text = "\n" . $text . "\n";
             } elseif ($tag === 'td' || $tag === 'th') {
                 $text .= ' ';
             }

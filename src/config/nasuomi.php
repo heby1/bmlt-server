@@ -6,6 +6,7 @@ return [
     'admin_username' => env('NASUOMI_ADMIN_USERNAME', 'serveradmin'),
     'initial_admin_password' => env('NASUOMI_INITIAL_ADMIN_PASSWORD'),
     'coordinate_overrides' => env('NASUOMI_COORDINATE_OVERRIDES'),
+    'alert_email' => env('NASUOMI_ALERT_EMAIL'),
     'schedule_enabled' => filter_var(env('NASUOMI_SCHEDULE_ENABLED', false), FILTER_VALIDATE_BOOLEAN),
     'sync_time' => env('NASUOMI_SYNC_TIME', '04:15'),
 ];
