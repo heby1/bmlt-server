@@ -55,6 +55,9 @@ add dependencies, abstractions or infrastructure without an explicit need.
   package a local environment file in a release.
 - Use the Finnish Docker override for local work. Production is SiteGround
   Apache/PHP/MySQL with a cron entry; do not deploy without explicit authorization.
+- Deployment uses SSH alias `nasuomi` and directory
+  `/home/customer/www/nasuomi.org/public_html/bmltfi`. The user manages cron through
+  SiteGround's dashboard; do not write crontab.
 - Production uses `https://www.nasuomi.org/bmltfi/`; extract the upstream ZIP's
   `main_server` directory and rename it to `bmltfi`. Keep local `/main_server/`
   development URLs unchanged.
