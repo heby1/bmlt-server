@@ -32,7 +32,7 @@ must contain at least 12 characters. Keep it available for login. A Laravel
 application key can be generated with:
 
 ```sh
-docker run --rm bmltenabled/bmlt-server-base:8.3 php -r 'echo "base64:" . base64_encode(random_bytes(32)) . PHP_EOL;'
+docker run --rm bmltenabled/bmlt-server-base:8.5 php -r 'echo "base64:" . base64_encode(random_bytes(32)) . PHP_EOL;'
 ```
 
 The ignored **root `.env`** is outside `src/` and the release artifact. Never

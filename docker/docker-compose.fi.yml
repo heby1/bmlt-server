@@ -1,6 +1,9 @@
 # Requires Docker Compose 2.24.4 or later. Run from the repository root.
 services:
   bmlt:
+    build:
+      args:
+        - PHP_VERSION=${PHP_VERSION:-8.5}
     ports: !override
       - "127.0.0.1:${BMLT_PORT:-8000}:8000"
     env_file:
